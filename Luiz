@@ -1,0 +1,221 @@
+--[[
+    ============================================================
+    MÓDULO: GODMODE (Loadstring / Executor Mobile)
+    ------------------------------------------------------------
+    REQUISITOS ATENDIDOS:
+    - Impede dano de fontes do próprio jogo enquanto ativado
+    - Botão indica visualmente ON/OFF (cor + texto)
+    - Código organizado em funções/módulos
+    - UI responsiva (AnchorPoint + offsets fixos)
+    - Comentado nas partes importantes
+    ============================================================
+]]
+
+-- ============================================================
+-- SERVIÇOS
+-- ============================================================
+local Players      = game:GetService("Players")
+local RunService   = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local CoreGui      = game:GetService("CoreGui")
+
+local LocalPlayer = Players.LocalPlayer
+
+-- ============================================================
+-- EVITA DUPLICAÇÃO
+-- ============================================================
+if CoreGui:FindFirstChild("ModuloGodMode") then
+    CoreGui.ModuloGodMode:Destroy()
+end
+
+-- ============================================================
+-- CONFIGURAÇÃO
+-- ============================================================
+local CONFIG = {
+    Cores = {
+        Fundo         = Color3.fromRGB(22, 22, 32),
+        Elemento      = Color3.fromRGB(44, 44, 60),
+        ElementoHover = Color3.fromRGB(56, 56, 76),
+        Texto         = Color3.fromRGB(235, 235, 245),
+        Ativo         = Color3.fromRGB(70, 200, 130),  -- verde quando ON
+        Inativo       = Color3.fromRGB(44, 44, 60),    -- cinza quando OFF
+        Borda         = Color3.fromRGB(60, 60, 80),
+    },
+    VidaNormal = 100,
+}
+
+-- ============================================================
+-- ESTADO
+-- ============================================================
+local Estado = {
+    Ativo = false,
+}
+
+-- ============================================================
+-- HELPERS DE UI
+-- ============================================================
+
+-- Cria um botão com estilo padrão (corner arredondado, sem auto-button)
+local function criarBotao(parent, props)
+    local botao = Instance.new("TextButton")
+    botao.BorderSizePixel  = 0
+    botao.BackgroundColor3 = CONFIG.Cores.Inativo
+    botao.TextColor3       = CONFIG.Cores.Texto
+    botao.Font             = Enum.Font.GothamBold
+    botao.TextSize         = 15
+    botao.AutoButtonColor  = false
+    botao.Selectable       = false
+    botao.Text             = ""
+    for k, v in pairs(props) do botao[k] = v end
+    botao.Parent = parent
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 12)
+    corner.Parent = botao
+
+    return botao
+end
+
+-- Animação suave de cor (usada para ON/OFF e hover)
+local function animarCor(obj, cor, duracao)
+    TweenService:Create(
+        obj,
+        TweenInfo.new(duracao or 0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+        { BackgroundColor3 = cor }
+    ):Play()
+end
+
+-- ============================================================
+-- INTERFACE
+-- ============================================================
+
+-- Constrói o ScreenGui, painel e botão. Retorna o botão para
+-- que o MouseButton1Click seja conectado na inicialização.
+local function criarInterface()
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name           = "ModuloGodMode"
+    screenGui.ResetOnSpawn   = false
+    screenGui.IgnoreGuiInset = true
+    screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+    -- Fallback: CoreGui (executor mobile) ou PlayerGui (Studio)
+    local ok = pcall(function() screenGui.Parent = CoreGui end)
+    if not ok then
+        screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+    end
+
+    -- Painel fixo no canto inferior esquerdo (responsivo)
+    local painel = Instance.new("Frame")
+    painel.AnchorPoint      = Vector2.new(0, 1)          -- ancora no canto inferior esquerdo
+    painel.Position         = UDim2.new(0, 20, 1, -20)   -- 20px de margem
+    painel.Size             = UDim2.fromOffset(220, 60)
+    painel.BackgroundColor3 = CONFIG.Cores.Fundo
+    painel.BorderSizePixel  = 0
+    painel.Parent           = screenGui
+
+    local painelCorner = Instance.new("UICorner")
+    painelCorner.CornerRadius = UDim.new(0, 14)
+    painelCorner.Parent = painel
+
+    -- Borda sutil
+    local borda = Instance.new("UIStroke")
+    borda.Color        = CONFIG.Cores.Borda
+    borda.Thickness    = 1
+    borda.Transparency = 0.3
+    borda.Parent       = painel
+
+    -- Botão principal
+    local botaoGodMode = criarBotao(painel, {
+        Name     = "BotaoGodMode",
+        Size     = UDim2.new(1, -20, 1, -20),
+        Position = UDim2.fromOffset(10, 10),
+        Text     = "GodMode: OFF",
+    })
+
+    -- Efeitos de hover (só quando inativo, para não confundir o estado)
+    botaoGodMode.MouseEnter:Connect(function()
+        if not Estado.Ativo then
+            animarCor(botaoGodMode, CONFIG.Cores.ElementoHover)
+        end
+    end)
+    botaoGodMode.MouseLeave:Connect(function()
+        if not Estado.Ativo then
+            animarCor(botaoGodMode, CONFIG.Cores.Inativo)
+        end
+    end)
+
+    return botaoGodMode
+end
+
+-- ============================================================
+-- LÓGICA DE GODMODE
+-- ============================================================
+
+-- Aplica o estado atual ao Humanoid do jogador
+local function aplicarEstado()
+    local personagem = LocalPlayer.Character
+    if not personagem then return end
+    local humanoid = personagem:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return end
+
+    if Estado.Ativo then
+        -- Vida infinita
+        humanoid.MaxHealth = math.huge
+        humanoid.Health    = math.huge
+    else
+        -- Restaura vida normal
+        humanoid.MaxHealth = CONFIG.VidaNormal
+        humanoid.Health    = math.min(humanoid.Health, CONFIG.VidaNormal)
+        if humanoid.Health <= 0 then
+            humanoid.Health = CONFIG.VidaNormal
+        end
+    end
+end
+
+-- Atualiza o visual do botão conforme o estado
+local function atualizarVisualBotao(botao)
+    if Estado.Ativo then
+        botao.Text = "GodMode: ON"
+        animarCor(botao, CONFIG.Cores.Ativo)
+    else
+        botao.Text = "GodMode: OFF"
+        animarCor(botao, CONFIG.Cores.Inativo)
+    end
+end
+
+-- Alterna o estado: muda visual + aplica no Humanoid
+local function alternar(botao)
+    Estado.Ativo = not Estado.Ativo
+    atualizarVisualBotao(botao)
+    aplicarEstado()
+end
+
+-- ============================================================
+-- MONITOR CONTÍNUO
+-- ============================================================
+
+-- Reaplica vida máxima a cada frame enquanto ativo.
+-- Isso neutraliza qualquer dano aplicado via Humanoid.Health -= X
+RunService.Heartbeat:Connect(function()
+    if not Estado.Ativo then return end
+    local personagem = LocalPlayer.Character
+    if not personagem then return end
+    local humanoid = personagem:FindFirstChildOfClass("Humanoid")
+    if humanoid and humanoid.Health > 0 and humanoid.Health < humanoid.MaxHealth then
+        humanoid.Health = humanoid.MaxHealth
+    end
+end)
+
+-- Reaplica o GodMode quando o personagem respawna
+LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(0.3)
+    aplicarEstado()
+end)
+
+-- ============================================================
+-- INICIALIZAÇÃO
+-- ============================================================
+local botaoGodMode = criarInterface()
+botaoGodMode.MouseButton1Click:Connect(function()
+    alternar(botaoGodMode)
+end)
